@@ -1,0 +1,19 @@
+# THIS IS FOR DEV-ONLY DEPLOYMENT
+# BEWARE THAT THERE IS NO AUTHENTICATION
+# SO EVERYONE CAN CONSUME YOUR LLM API TOKEN!
+# TO BE USED ONLY WITH TIGHTLY LIMITED API KEYS
+# BUDGET + EXPIRATION DATE!
+# OpenRouter API keys: https://openrouter.ai/settings/keys
+# https://www.lbke.fr/ressources/deployer-langchain-langgraph-sur-render
+# https://render.com/docs/blueprint-spec
+services:
+  - name: langgraph-dev
+    type: web
+    runtime: python
+    plan: free
+    buildCommand: pip install . "langgraph-cli[inmem]"
+    startCommand: langgraph dev --port $PORT --host 0.0.0.0 --no-browser
+    # https://render.com/docs/blueprint-spec#setting-environment-variables
+    envVars:
+      - key: MISTRAL_API_KEY
+        sync: false

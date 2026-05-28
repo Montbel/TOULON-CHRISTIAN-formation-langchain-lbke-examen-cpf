@@ -1,0 +1,10 @@
+{
+  "$schema": "https://langgra.ph/schema.json",
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./src/react_agent/graph.py:graph",
+    "mcp-agent": "./src/mcp_agent/graph.py:graph",
+    "langchain-agent": "./src/langchain_agent/agent.py:agent"
+  },
+  "env": ".env"
+}
