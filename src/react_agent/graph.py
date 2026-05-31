@@ -17,10 +17,23 @@ from react_agent.state import InputState, State
 from react_agent.tools import TOOLS
 from react_agent.utils import load_chat_model
 
+import langsmith as ls
+
 import os
 
-# Define the function that calls the model
+# init Langsmith
+import langsmith as ls
+print("Enabling langsmith")
+os.environ["LANGSMITH_API_KEY"]=userdata.get("LANGSMITH_API_KEY")
+if (os.environ["LANGSMITH_API_KEY"]):
+  os.environ["LANGSMITH_TRACING"]="true"
+  os.environ["LANGSMITH_PROJECT"]="formation-langchain-jour-2"
+else:
+  print("LangSmith is not activated (no API key)")
 
+os.environ["LANGSMITH_ENDPOINT"]="https://eu.api.smith.langchain.com"
+
+# Define the function that calls the model
 
 async def call_model(
     state: State, runtime: Runtime[Context]
