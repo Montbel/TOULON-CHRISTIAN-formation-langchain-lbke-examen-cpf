@@ -1,9 +1,0 @@
-{
-	"servers": {
-		"langchain-test-formation": {
-			"url": "http://127.0.0.1:2024/mcp",
-			"type": "http"
-		}
-	},
-	"inputs": []
-}
