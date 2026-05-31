@@ -3,6 +3,7 @@
 Works with a chat model with tool calling support.
 """
 
+import os
 from datetime import UTC, datetime
 from typing import Dict, List, Literal, cast
 
@@ -17,21 +18,18 @@ from react_agent.state import InputState, State
 from react_agent.tools import TOOLS
 from react_agent.utils import load_chat_model
 
-import langsmith as ls
+# Init LangSmith
+print("Enabling LangSmith...")
 
-import os
+api_key = os.environ.get("LANGSMITH_API_KEY")
 
-# init Langsmith
-import langsmith as ls
-print("Enabling langsmith")
-os.environ["LANGSMITH_API_KEY"]=userdata.get("LANGSMITH_API_KEY")
-if (os.environ["LANGSMITH_API_KEY"]):
-  os.environ["LANGSMITH_TRACING"]="true"
-  os.environ["LANGSMITH_PROJECT"]="TOULON-CHRISTIAN-formation-langchain-lbke-examen-cpf"
+if api_key:
+    os.environ["LANGSMITH_ENDPOINT"]    = "https://eu.api.smith.langchain.com"
+    os.environ["LANGSMITH_TRACING"]     = "true"
+    os.environ["LANGSMITH_PROJECT"]     = "TOULON-CHRISTIAN-formation-langchain-lbke-examen-cpf"
+    print("LangSmith activated")
 else:
-  print("LangSmith is not activated (no API key)")
-
-os.environ["LANGSMITH_ENDPOINT"]="https://eu.api.smith.langchain.com"
+    print("LangSmith is not activated (no API key)")
 
 # Define the function that calls the model
 
