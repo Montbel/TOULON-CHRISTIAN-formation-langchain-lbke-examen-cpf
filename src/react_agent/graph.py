@@ -105,16 +105,12 @@ Ton rôle :
 
 Réponds toujours en français."""
 
-print("--- SYSTEM_PROMPT ---", flush=True)
-print (SYSTEM_PROMPT, flush=True)
-
 #=========================================================================================
 # Nœud principal
 #=========================================================================================
 async def call_model(state: State) -> dict:
     model = init_chat_model(
-        #model="mistralai/codestral-2508",
-        model="mistralai/mistral-small-3.2-24b", # modèle gratuit
+        model="mistralai/codestral-2508",
         model_provider="openai",
         base_url="https://openrouter.ai/api/v1",
         api_key=os.environ["OPENROUTER_API_KEY"],
@@ -129,11 +125,6 @@ async def call_model(state: State) -> dict:
         {"role": "system", "content": system_message},
         {"role": "user",   "content": state["user_message"]},
     ])
-    
-    print("--- system_message ---", file=sys.stderr, flush=True)
-    print(system_message, file=sys.stderr, flush=True)
-    print("--- criteres ---", file=sys.stderr, flush=True)
-    print(response.criteres.model_dump(), file=sys.stderr, flush=True)
 
     return {
         "ai_message": response.message,
