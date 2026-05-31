@@ -27,7 +27,7 @@ print("Enabling langsmith")
 os.environ["LANGSMITH_API_KEY"]=userdata.get("LANGSMITH_API_KEY")
 if (os.environ["LANGSMITH_API_KEY"]):
   os.environ["LANGSMITH_TRACING"]="true"
-  os.environ["LANGSMITH_PROJECT"]="formation-langchain-jour-2"
+  os.environ["LANGSMITH_PROJECT"]="TOULON-CHRISTIAN-formation-langchain-lbke-examen-cpf"
 else:
   print("LangSmith is not activated (no API key)")
 
