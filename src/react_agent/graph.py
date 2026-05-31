@@ -1,138 +1,151 @@
-"""Define a custom Reasoning and Action agent.
+"""Chatbot de recommandation de voyages."""
 
-Works with a chat model with tool calling support.
-"""
-
+import json
 import os
-from datetime import UTC, datetime
-from typing import Dict, List, Literal, cast
+import sys
+from typing import Optional, TypedDict
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import AIMessage
-from langgraph.graph import StateGraph
-from langgraph.prebuilt import ToolNode
-from langgraph.runtime import Runtime
+from langgraph.graph import END, StateGraph
+from pydantic import BaseModel, Field
 
-from react_agent.context import Context
-from react_agent.state import InputState, State
-from react_agent.tools import TOOLS
-from react_agent.utils import load_chat_model
-
+#=========================================================================================
 # Init LangSmith
+#=========================================================================================
 print("Enabling LangSmith...")
 
 api_key = os.environ.get("LANGSMITH_API_KEY")
-
 if api_key:
-    os.environ["LANGSMITH_ENDPOINT"]    = "https://eu.api.smith.langchain.com"
-    os.environ["LANGSMITH_TRACING"]     = "true"
-    os.environ["LANGSMITH_PROJECT"]     = "TOULON-CHRISTIAN-formation-langchain-lbke-examen-cpf"
+    os.environ["LANGSMITH_ENDPOINT"] = "https://eu.api.smith.langchain.com"
+    os.environ["LANGSMITH_TRACING"]  = "true"
+    os.environ["LANGSMITH_PROJECT"]  = "TOULON-CHRISTIAN-formation-langchain-lbke-examen-cpf"
     print("LangSmith activated")
 else:
     print("LangSmith is not activated (no API key)")
 
-# Define the function that calls the model
+#=========================================================================================
+# Données : voyages disponibles
+#=========================================================================================
+VOYAGES = [
+    {
+        "nom": "Randonnée camping en Lozère",
+        "labels": ["sport", "montagne", "campagne"],
+        "accessibleHandicap": "non",
+    },
+    {
+        "nom": "5 étoiles à Chamonix option fondue",
+        "labels": ["montagne", "détente"],
+        "accessibleHandicap": "oui",
+    },
+    {
+        "nom": "5 étoiles à Chamonix option ski",
+        "labels": ["montagne", "sport"],
+        "accessibleHandicap": "non",
+    },
+    {
+        "nom": "Palavas de paillotes en paillotes",
+        "labels": ["plage", "ville", "détente", "paillote"],
+        "accessibleHandicap": "oui",
+    },
+    {
+        "nom": "5 étoiles en rase campagne",
+        "labels": ["campagne", "détente"],
+        "accessibleHandicap": "oui",
+    },
+]
 
-async def call_model(
-    state: State, runtime: Runtime[Context]
-) -> Dict[str, List[AIMessage]]:
-    """Call the LLM powering our "agent".
+#=========================================================================================
+# Schémas Pydantic pour la sortie structurée
+#=========================================================================================
+class Criteres(BaseModel):
+    plage:          Optional[bool] = Field(default=None, description="L'utilisateur aime la plage")
+    montagne:       Optional[bool] = Field(default=None, description="L'utilisateur aime la montagne")
+    ville:          Optional[bool] = Field(default=None, description="L'utilisateur aime la ville")
+    sport:          Optional[bool] = Field(default=None, description="L'utilisateur veut faire du sport")
+    detente:        Optional[bool] = Field(default=None, description="L'utilisateur veut se détendre")
+    acces_handicap: Optional[bool] = Field(default=None, description="L'utilisateur a besoin d'un accès handicap")
 
-    This function prepares the prompt, initializes the model, and processes the response.
 
-    Args:
-        state (State): The current state of the conversation.
-        config (RunnableConfig): Configuration for the model run.
+class AgentResponse(BaseModel):
+    criteres: Criteres = Field(description="Critères mis à jour selon le message de l'utilisateur")
+    message:  str      = Field(description="Réponse en langage naturel à envoyer à l'utilisateur")
 
-    Returns:
-        dict: A dictionary containing the model's response message.
-    """
-    # Initialize the model with tool binding. Change the model or add more tools here.
+#=========================================================================================
+# State
+#=========================================================================================
+class InputState(TypedDict):
+    user_message: str
+
+
+class State(TypedDict):
+    user_message: str
+    ai_message:   str
+    criteres:     dict  # sérialisation de Criteres
+
+#=========================================================================================
+# Prompt système
+#=========================================================================================
+SYSTEM_PROMPT = """Tu es un agent de recommandation de voyages pour une agence de tourisme.
+
+Voyages disponibles :
+{voyages}
+
+Critères actuels de l'utilisateur :
+{criteres}
+
+Ton rôle :
+1. Analyse le message de l'utilisateur et mets à jour les critères :
+   - Goût positif pour un critère  → True
+   - Goût négatif ou indifférence  → False
+   - Critère non mentionné         → conserve la valeur actuelle (None si encore inconnu)
+2. Réponds en un seul message :
+   - Aucun critère à True : demande à l'utilisateur de préciser ses envies.
+   - Au moins un critère à True : propose les voyages correspondants et invite à préciser.
+3. Si le message est incompréhensible, signale-le poliment et continue le scénario.
+
+Réponds toujours en français."""
+
+print("--- SYSTEM_PROMPT ---", flush=True)
+print (SYSTEM_PROMPT, flush=True)
+
+#=========================================================================================
+# Nœud principal
+#=========================================================================================
+async def call_model(state: State) -> dict:
     model = init_chat_model(
-        model="mistralai/codestral-2508",
-        # OpenRouter utilise le même format d'API qu'OpenAI
-        # qui est un standard "de fait"
+        #model="mistralai/codestral-2508",
+        model="mistralai/mistral-small-3.2-24b", # modèle gratuit
         model_provider="openai",
         base_url="https://openrouter.ai/api/v1",
         api_key=os.environ["OPENROUTER_API_KEY"],
-    ).bind_tools(TOOLS)
-    # model = load_chat_model(runtime.context.model).bind_tools(TOOLS)
+    ).with_structured_output(AgentResponse)
 
-    # Format the system prompt. Customize this to change the agent's behavior.
-    system_message = runtime.context.system_prompt.format(
-        system_time=datetime.now(tz=UTC).isoformat()
+    system_message = SYSTEM_PROMPT.format(
+        voyages=json.dumps(VOYAGES, ensure_ascii=False, indent=2),
+        criteres=json.dumps(state.get("criteres", {}), ensure_ascii=False),
     )
 
-    # Get the model's response
-    response = cast(  # type: ignore[redundant-cast]
-        AIMessage,
-        await model.ainvoke(
-            [{"role": "system", "content": system_message}, *state.messages]
-        ),
-    )
+    response: AgentResponse = await model.ainvoke([
+        {"role": "system", "content": system_message},
+        {"role": "user",   "content": state["user_message"]},
+    ])
+    
+    print("--- system_message ---", file=sys.stderr, flush=True)
+    print(system_message, file=sys.stderr, flush=True)
+    print("--- criteres ---", file=sys.stderr, flush=True)
+    print(response.criteres.model_dump(), file=sys.stderr, flush=True)
 
-    # Handle the case when it's the last step and the model still wants to use a tool
-    if state.is_last_step and response.tool_calls:
-        return {
-            "messages": [
-                AIMessage(
-                    id=response.id,
-                    content="Sorry, I could not find an answer to your question in the specified number of steps.",
-                )
-            ]
-        }
+    return {
+        "ai_message": response.message,
+        "criteres":   response.criteres.model_dump(),
+    }
 
-    # Return the model's response as a list to be added to existing messages
-    return {"messages": [response]}
-
-
-# Define a new graph
-
-builder = StateGraph(State, input_schema=InputState, context_schema=Context)
-
-# Define the two nodes we will cycle between
-builder.add_node(call_model)
-builder.add_node("tools", ToolNode(TOOLS))
-
-# Set the entrypoint as `call_model`
-# This means that this node is the first one called
+#=========================================================================================
+# Graph
+#=========================================================================================
+builder = StateGraph(State, input_schema=InputState)
+builder.add_node("call_model", call_model)
 builder.add_edge("__start__", "call_model")
+builder.add_edge("call_model", END)
 
-
-def route_model_output(state: State) -> Literal["__end__", "tools"]:
-    """Determine the next node based on the model's output.
-
-    This function checks if the model's last message contains tool calls.
-
-    Args:
-        state (State): The current state of the conversation.
-
-    Returns:
-        str: The name of the next node to call ("__end__" or "tools").
-    """
-    last_message = state.messages[-1]
-    if not isinstance(last_message, AIMessage):
-        raise ValueError(
-            f"Expected AIMessage in output edges, but got {type(last_message).__name__}"
-        )
-    # If there is no tool call, then we finish
-    if not last_message.tool_calls:
-        return "__end__"
-    # Otherwise we execute the requested actions
-    return "tools"
-
-
-# Add a conditional edge to determine the next step after `call_model`
-builder.add_conditional_edges(
-    "call_model",
-    # After call_model finishes running, the next node(s) are scheduled
-    # based on the output from route_model_output
-    route_model_output,
-)
-
-# Add a normal edge from `tools` to `call_model`
-# This creates a cycle: after using tools, we always return to the model
-builder.add_edge("tools", "call_model")
-
-# Compile the builder into an executable graph
 graph = builder.compile(name="ReAct Agent")
