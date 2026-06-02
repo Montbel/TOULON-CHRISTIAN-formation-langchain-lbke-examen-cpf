@@ -98,9 +98,12 @@ Ton rôle :
    - Goût positif pour un critère  → True
    - Goût négatif ou indifférence  → False
    - Critère non mentionné         → conserve la valeur actuelle (None si encore inconnu)
-2. Réponds en un seul message :
+   
+2. Répondre en un seul message :
+   - Faire un résumé de tout les critères actuels de l'utilisateur à true, s'il y en a au moins un à true.
    - Aucun critère à True : demande à l'utilisateur de préciser ses envies.
-   - Au moins un critère à True : propose les voyages correspondants et invite à préciser.
+   - Aucun voyage ne correspond aux critères de l'utilisateur : dire à l'utilisateur qu'aucun voyage ne correspond à ses critères.
+   - Des voyages correspondent aux critères de l'utilisateur : afficher la liste des voyages.
 3. Si le message est incompréhensible, signale-le poliment et continue le scénario.
 
 Réponds toujours en français."""
@@ -110,11 +113,14 @@ Réponds toujours en français."""
 #=========================================================================================
 async def call_model(state: State) -> dict:
     model = init_chat_model(
-        model="mistralai/codestral-2508",
+        model="mistralai/ministral-3b-2512",
         model_provider="openai",
         base_url="https://openrouter.ai/api/v1",
         api_key=os.environ["OPENROUTER_API_KEY"],
     ).with_structured_output(AgentResponse)
+
+    print("---- input.criteres ----")
+    print(json.dumps(state.get("criteres", {}), ensure_ascii=False))
 
     system_message = SYSTEM_PROMPT.format(
         voyages=json.dumps(VOYAGES, ensure_ascii=False, indent=2),
@@ -125,6 +131,15 @@ async def call_model(state: State) -> dict:
         {"role": "system", "content": system_message},
         {"role": "user",   "content": state["user_message"]},
     ])
+
+    print("---- system_message ----")
+    print(system_message)
+    print("---- user_message ----")
+    print(state["user_message"])
+    print("---- response.message -----")
+    print(response.message)
+    print("---- response.criteres ----")
+    print(response.criteres.model_dump())
 
     return {
         "ai_message": response.message,
