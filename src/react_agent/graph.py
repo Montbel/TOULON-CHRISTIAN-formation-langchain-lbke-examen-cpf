@@ -2,10 +2,10 @@
 
 import json
 import os
-import sys
 from typing import Optional, TypedDict
 
 from langchain.chat_models import init_chat_model
+from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from pydantic import BaseModel, Field
 
@@ -24,7 +24,7 @@ else:
     print("LangSmith is not activated (no API key)")
 
 #=========================================================================================
-# Données : voyages disponibles
+# Voyages
 #=========================================================================================
 VOYAGES = [
     {
@@ -34,7 +34,7 @@ VOYAGES = [
     },
     {
         "nom": "5 étoiles à Chamonix option fondue",
-        "labels": ["montagne", "détente"],
+        "labels": ["montagne", "detente"],
         "accessibleHandicap": "oui",
     },
     {
@@ -44,21 +44,57 @@ VOYAGES = [
     },
     {
         "nom": "Palavas de paillotes en paillotes",
-        "labels": ["plage", "ville", "détente", "paillote"],
+        "labels": ["plage", "ville", "detente", "paillote"],
         "accessibleHandicap": "oui",
     },
     {
         "nom": "5 étoiles en rase campagne",
-        "labels": ["campagne", "détente"],
+        "labels": ["campagne", "detente"],
         "accessibleHandicap": "oui",
     },
 ]
 
 #=========================================================================================
-# Schémas Pydantic pour la sortie structurée
+# Tool
+#=========================================================================================
+def find_matching_voyages(voyages: list, criteres: dict) -> list:
+    matching = []
+    for voyage in voyages:
+        labels = voyage["labels"]
+        accessible = voyage["accessibleHandicap"] == "oui"
+        match = True
+        for critere, valeur in criteres.items():
+            if critere == "acces_handicap":
+                if valeur is True and not accessible:
+                    match = False
+                    break
+            else:
+                if valeur is True and critere not in labels:
+                    match = False
+                    break
+                if valeur is False and critere in labels:
+                    match = False
+                    break
+        if match:
+            matching.append(voyage["nom"])
+    return matching
+
+
+@tool
+def rechercher_voyages(criteres: dict) -> list:
+    """Recherche les voyages correspondant aux critères de l'utilisateur.
+    Retourne la liste des noms de voyages correspondants.
+    Doit être appelé après chaque mise à jour des critères."""
+    return find_matching_voyages(VOYAGES, criteres)
+
+
+#=========================================================================================
+# Schémas Pydantic
 #=========================================================================================
 class Criteres(BaseModel):
     plage:          Optional[bool] = Field(default=None, description="L'utilisateur aime la plage")
+    campagne:       Optional[bool] = Field(default=None, description="L'utilisateur aime la campagne")
+    paillote:       Optional[bool] = Field(default=None, description="L'utilisateur veut un accès à des paillottes")
     montagne:       Optional[bool] = Field(default=None, description="L'utilisateur aime la montagne")
     ville:          Optional[bool] = Field(default=None, description="L'utilisateur aime la ville")
     sport:          Optional[bool] = Field(default=None, description="L'utilisateur veut faire du sport")
@@ -66,9 +102,11 @@ class Criteres(BaseModel):
     acces_handicap: Optional[bool] = Field(default=None, description="L'utilisateur a besoin d'un accès handicap")
 
 
-class AgentResponse(BaseModel):
-    criteres: Criteres = Field(description="Critères mis à jour selon le message de l'utilisateur")
-    message:  str      = Field(description="Réponse en langage naturel à envoyer à l'utilisateur")
+class CriteresResponse(BaseModel):
+    criteres:         Criteres      = Field(description="Critères mis à jour selon le message de l'utilisateur")
+    incomprehensible: bool          = Field(default=False, description="True si le message est incompréhensible")
+    ai_message:       Optional[str] = Field(default=None, description="Message poli à retourner si le message est incompréhensible")
+
 
 #=========================================================================================
 # State
@@ -78,80 +116,152 @@ class InputState(TypedDict):
 
 
 class State(TypedDict):
-    user_message: str
-    ai_message:   str
-    criteres:     dict  # sérialisation de Criteres
+    user_message:     str
+    ai_message:       str
+    criteres:         dict
+    incomprehensible: bool
+
 
 #=========================================================================================
-# Prompt système
+# Prompts
 #=========================================================================================
-SYSTEM_PROMPT = """Tu es un agent de recommandation de voyages pour une agence de tourisme.
+PROMPT_CRITERES = """Tu es un assistant qui extrait les critères de voyage d'un utilisateur.
 
-Voyages disponibles :
-{voyages}
+Critères actuels :
+{criteres}
+
+Si le message est incompréhensible :
+- Mets incomprehensible à True
+- Rédige un message poli dans ai_message pour demander à l'utilisateur de reformuler
+- Ne modifie pas les critères
+
+Sinon, mets à jour uniquement les critères explicitement mentionnés :
+- Envie positive                                        → True
+- Annulation (ex: "oublie le sport", "retire le sport") → None
+- Rejet      (ex: "je ne veux pas de sport")            → False
+- Non mentionné → conserve la valeur actuelle (None si encore inconnu)"""
+
+
+PROMPT_REPONSE = """Tu es un agent de recommandation de voyages pour une agence de tourisme.
 
 Critères actuels de l'utilisateur :
 {criteres}
 
-Ton rôle :
-1. Analyse le message de l'utilisateur et mets à jour les critères :
-   - Goût positif pour un critère  → True
-   - Goût négatif ou indifférence  → False
-   - Critère non mentionné         → conserve la valeur actuelle (None si encore inconnu)
-   
-2. Répondre en un seul message :
-   - Faire un résumé de tout les critères actuels de l'utilisateur à true, s'il y en a au moins un à true.
-   - Aucun critère à True : demande à l'utilisateur de préciser ses envies.
-   - Aucun voyage ne correspond aux critères de l'utilisateur : dire à l'utilisateur qu'aucun voyage ne correspond à ses critères.
-   - Des voyages correspondent aux critères de l'utilisateur : afficher la liste des voyages.
-3. Si le message est incompréhensible, signale-le poliment et continue le scénario.
+## Règles
+1. Appelle TOUJOURS l'outil rechercher_voyages avec les critères actuels.
+2. Aucun critère à True     → demande à l'utilisateur de préciser ses envies.
+3. Des voyages correspondent → affiche la liste retournée par l'outil.
+4. Aucun voyage ne correspond → indique-le clairement et propose de modifier les critères.
 
+Rappelle toujours en début de réponse le résumé des critères à True.
 Réponds toujours en français."""
 
 #=========================================================================================
-# Nœud principal
+# Modèles
 #=========================================================================================
-async def call_model(state: State) -> dict:
-    model = init_chat_model(
-        model="mistralai/ministral-3b-2512",
-        model_provider="openai",
-        base_url="https://openrouter.ai/api/v1",
-        api_key=os.environ["OPENROUTER_API_KEY"],
-    ).with_structured_output(AgentResponse)
+_llm_criteres = init_chat_model(
+    model="mistralai/mistral-small-2603",
+    model_provider="openai",
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ["OPENROUTER_API_KEY"],
+).with_structured_output(CriteresResponse)
 
-    print("---- input.criteres ----")
-    print(json.dumps(state.get("criteres", {}), ensure_ascii=False))
+_llm_response = init_chat_model(
+    model="mistralai/mistral-small-2603",
+    model_provider="openai",
+    base_url="https://openrouter.ai/api/v1",
+    api_key=os.environ["OPENROUTER_API_KEY"],
+).bind_tools([rechercher_voyages])
 
-    system_message = SYSTEM_PROMPT.format(
-        voyages=json.dumps(VOYAGES, ensure_ascii=False, indent=2),
-        criteres=json.dumps(state.get("criteres", {}), ensure_ascii=False),
-    )
+#=========================================================================================
+# Nœud 1 : mise à jour des critères
+#=========================================================================================
+async def update_criteres(state: State) -> dict:
+    criteres_actuels = state.get("criteres", {})
 
-    response: AgentResponse = await model.ainvoke([
-        {"role": "system", "content": system_message},
-        {"role": "user",   "content": state["user_message"]},
-    ])
+    messages_criteres = [
+        {"role": "system", "content": PROMPT_CRITERES.format(
+            criteres=json.dumps(criteres_actuels, ensure_ascii=False),
+        )},
+        {"role": "user", "content": state["user_message"]},
+    ]
+    print("---- messages envoyés au LLM critères ----")
+    print(json.dumps(messages_criteres, ensure_ascii=False, indent=2))
 
-    print("---- system_message ----")
-    print(system_message)
-    print("---- user_message ----")
-    print(state["user_message"])
-    print("---- response.message -----")
-    print(response.message)
-    print("---- response.criteres ----")
-    print(response.criteres.model_dump())
+    response: CriteresResponse = await _llm_criteres.ainvoke(messages_criteres)
+
+    if response.incomprehensible:
+        print("---- message incompréhensible ----")
+        return {
+            "criteres":         criteres_actuels,
+            "incomprehensible": True,
+            "ai_message":       response.ai_message,
+        }
+
+    # Merge : on écrase uniquement les champs explicitement fournis par le LLM
+    # (exclude_unset=True distingue "non mentionné" de "annulé → None")
+    nouveaux_criteres = criteres_actuels.copy()
+    for k, v in response.criteres.model_dump(exclude_unset=True).items():
+        nouveaux_criteres[k] = v
+
+    print("---- criteres mis à jour ----")
+    print(json.dumps(nouveaux_criteres, ensure_ascii=False))
 
     return {
-        "ai_message": response.message,
-        "criteres":   response.criteres.model_dump(),
+        "criteres":         nouveaux_criteres,
+        "incomprehensible": False,
     }
+
+#=========================================================================================
+# Nœud 2 : génération de la réponse avec tool
+#=========================================================================================
+async def generate_response(state: State) -> dict:
+    criteres = state.get("criteres", {})
+
+    messages = [
+        {"role": "system", "content": PROMPT_REPONSE.format(
+            criteres=json.dumps(criteres, ensure_ascii=False),
+        )},
+        {"role": "user", "content": state["user_message"]},
+    ]
+
+    # Boucle ReAct : le LLM peut appeler le tool plusieurs fois
+    while True:
+        response = await _llm_response.ainvoke(messages)
+        messages.append(response)
+
+        if not response.tool_calls:
+            break
+
+        for tool_call in response.tool_calls:
+            tool_result = rechercher_voyages.invoke(tool_call["args"])
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tool_call["id"],
+                "content": json.dumps(tool_result, ensure_ascii=False),
+            })
+
+    print("---- response.message -----")
+    print(response.content)
+
+    return {"ai_message": response.content}
+
+#=========================================================================================
+# Routing
+#=========================================================================================
+def route_after_criteres(state: State) -> str:
+    if state.get("incomprehensible"):
+        return END
+    return "generate_response"
 
 #=========================================================================================
 # Graph
 #=========================================================================================
 builder = StateGraph(State, input_schema=InputState)
-builder.add_node("call_model", call_model)
-builder.add_edge("__start__", "call_model")
-builder.add_edge("call_model", END)
+builder.add_node("update_criteres", update_criteres)
+builder.add_node("generate_response", generate_response)
+builder.add_edge("__start__", "update_criteres")
+builder.add_conditional_edges("update_criteres", route_after_criteres)
+builder.add_edge("generate_response", END)
 
 graph = builder.compile(name="ReAct Agent")
