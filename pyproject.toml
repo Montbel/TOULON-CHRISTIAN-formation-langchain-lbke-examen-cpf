@@ -1,25 +1,19 @@
 [project]
-name = "react-agent"
+name = "chatbot-voyages"
 version = "0.0.1"
-description = "Starter template for making a custom Reasoning and Action agent (using tool calling) in LangGraph."
+description = "Chatbot de recommandation de voyages (LangGraph) - examen CPF formation LangChain LBKE."
 authors = [
-    { name = "William Fu-Hinthorn", email = "13333726+hinthornw@users.noreply.github.com" },
+    { name = "Christian Toulon", email = "christian@toulon.cx" },
 ]
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.11,<4.0"
 dependencies = [
-    "langchain-fireworks>=0.1.7",
-    "langchain-tavily>=0.1",
     "langchain>=1.1.0",
     "langchain-openai>=1.1.9",
-    "langgraph-cli[inmem]>=0.4.7",
     "langgraph>=1.0.4",
-    "python-dotenv>=1.2.1",
-    "fastmcp>=3.3.1",
-    "langchain-mcp-adapters>=0.2.2",
+    "langgraph-cli[inmem]>=0.4.7",
 ]
-
 
 [project.optional-dependencies]
 dev = ["mypy>=1.11.1", "ruff>=0.6.1"]
@@ -33,19 +27,6 @@ package-dir = { "" = "src" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-# Default template config from langgraph new
-# only loads handpicked agents
-# yet we want to support more agents in this app
-#[tool.setuptools]
-#packages = ["langgraph.templates.react_agent", "react_agent"]
-#[tool.setuptools.package-dir]
-#"langgraph.templates.react_agent" = "src/react_agent"
-#"react_agent" = "src/react_agent"
-
-
-[tool.setuptools.package-data]
-"*" = ["py.typed"]
 
 [tool.ruff]
 lint.select = [
@@ -66,21 +47,5 @@ lint.ignore = [
     "D417",
     "E501",
 ]
-[tool.ruff.lint.per-file-ignores]
-"tests/*" = ["D", "UP"]
 [tool.ruff.lint.pydocstyle]
 convention = "google"
-
-[tool.uv.workspace]
-members = ["."]
-
-[tool.uv.sources]
-react-agent = { workspace = true }
-
-[dependency-groups]
-dev = [
-    "anyio>=4.7.0",
-    "langgraph-cli[inmem]>=0.4.7",
-    "pytest>=8.3.5",
-    "react-agent",
-]
